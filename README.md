@@ -179,4 +179,8 @@ p   += v·Δt
 
 In 1997 I ran LightWave 3D 5.5 on a Pentium 133 MHz and didn't sleep for a day. Almost 30 years later, this mini version was built in conversation with [Claude Code](https://claude.com/claude-code).
 
-*Not affiliated with LightWave 3D or its owners. This is an independent, nostalgic tribute.*
+## License & disclaimer
+
+Code released under the [MIT License](LICENSE), provided "as is" without warranty.
+
+**Trademark notice:** LightWave and LightWave 3D are trademarks of their respective owners. This project is an independent, non-commercial fan tribute and is **not affiliated with, endorsed by, or sponsored by** the owners of LightWave 3D. No original LightWave source code, binaries, icons, images or other assets were used. The interface was recreated from scratch, and the name is used only to describe the inspiration.
