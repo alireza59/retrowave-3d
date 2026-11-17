@@ -6,6 +6,8 @@ A tribute to **LightWave 3D 5.5 (1997)**: a mini 3D layout program with the clas
 
 ![Layout interface](screenshots/layout.png)
 
+🎬 **[Watch the demo video](lightwave_demo_45s_v3.mp4)**: rendering, moving objects, surfaces, views and a physics drop with collisions.
+
 ## Run
 
 Open `lightwave.html` in any modern browser.
