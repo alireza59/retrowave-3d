@@ -1,0 +1,702 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LightWave 3D Layout</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#202020;font-family:"Courier New",monospace;overflow:hidden;height:100vh}
+#wrap{position:relative;margin:0 auto}
+#app{transform-origin:0 0;position:absolute;left:0;top:0}
+#app{width:900px;height:660px;background:#7a7a7a;position:relative;border:2px solid #000;user-select:none;overflow:hidden}
+.btn{background:#9a9a9a;border:2px outset #c8c8c8;color:#000;font:bold 12px "Courier New",monospace;text-align:center;line-height:15px;height:19px;cursor:pointer;white-space:nowrap;overflow:hidden}
+.btn:active{border-style:inset}.btn.on{background:#e0c870}
+.lbl{position:absolute;color:#2a2a2a;font:bold 12px "Courier New",monospace;text-align:center;white-space:nowrap}
+.sep{position:absolute;height:3px;border-top:2px solid #555;border-bottom:1px solid #aaa}
+#view{position:absolute;left:220px;top:38px;border:2px inset #999;cursor:crosshair}
+.field{position:absolute;background:#5c5c5c;border:2px inset #999;color:#fff;font:bold 12px "Courier New",monospace;height:19px;line-height:15px;padding:0 4px;white-space:pre;overflow:hidden}
+input,select{font:bold 12px "Courier New",monospace;background:#5c5c5c;color:#fff;border:2px inset #999;height:21px;padding:0 3px}
+input[type=color]{padding:0;width:60px}
+input[type=range]{accent-color:#e0c870;padding:0;background:transparent;border:0}
+.req,#rwin{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35)}
+.req{z-index:40}#rwin{z-index:30;display:none}
+.win{background:#8a8a8a;border:2px outset #ccc;min-width:min(340px,95vw);max-width:95vw;box-shadow:4px 4px 0 #0008}
+.wt{background:#4a4a4a;color:#fff;font:bold 12px "Courier New",monospace;padding:3px 8px;text-align:center;cursor:move}
+.wb{padding:8px 10px;font:bold 12px "Courier New",monospace;color:#111;max-height:72vh;overflow:auto}
+.wf{padding:6px 10px;text-align:right;border-top:1px solid #aaa}
+.wf .btn,.wb .btn,#rbox .btn{display:inline-block;padding:0 10px;margin:2px}
+.r{display:flex;align-items:center;margin:3px 0;gap:6px}.r label{width:160px;text-align:right}
+.note{font-weight:normal;margin:4px 0;white-space:pre-wrap}
+.menu{position:fixed;z-index:50;background:#9a9a9a;border:2px outset #ccc;font:bold 12px "Courier New",monospace;min-width:190px;padding:2px 0;box-shadow:3px 3px 0 #0008;max-height:90vh;overflow:auto}
+.mi{padding:2px 12px;cursor:pointer;white-space:pre}.mi:hover{background:#e0c870}.mi.dis{color:#555;pointer-events:none}
+.mh{padding:2px 12px;color:#fff;background:#5a5a5a}.ms{border-top:1px solid #555;border-bottom:1px solid #bbb;margin:2px 0}
+#rbox{max-width:96vw;background:#7a7a7a;border:2px outset #ccc;padding:8px;font:bold 12px "Courier New",monospace}
+#rbox canvas{display:block;border:2px inset #999;background:#000;image-rendering:pixelated;width:min(640px,92vw);max-height:70vh;object-fit:contain}
+#pbar{height:14px;background:#5a5a5a;border:2px inset #999;margin:6px 0}#pfill{height:100%;background:#e0c870;width:0}
+</style></head><body>
+<div id="wrap"><div id="app"></div></div>
+<div id="rwin"><div id="rbox">
+ <div id="rstat">Rendering</div>
+ <div id="pbar"><div id="pfill"></div></div>
+ <canvas id="rc" width="640" height="400"></canvas>
+ <div style="margin-top:6px"><span class="btn" id="rabort">Abort</span><span class="btn" id="rclose">Close</span><span class="btn" id="rsave">Save RGB</span><span class="btn" id="rplay">Play</span></div>
+</div></div>
+<script id="core">
+// ================= math =================
+const V=(x,y,z)=>({x,y,z}),add=(a,b)=>V(a.x+b.x,a.y+b.y,a.z+b.z),sub=(a,b)=>V(a.x-b.x,a.y-b.y,a.z-b.z),
+mul=(a,s)=>V(a.x*s,a.y*s,a.z*s),dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z,
+cross=(a,b)=>V(a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x),len=a=>Math.sqrt(dot(a,a)),norm=a=>mul(a,1/len(a)),
+cm=(a,b)=>V(a.x*b.x,a.y*b.y,a.z*b.z),refl=(d,n)=>sub(d,mul(n,2*dot(d,n))),clamp=(v,a,b)=>v<a?a:v>b?b:v,AX=['x','y','z'];
+function rotY(v,a){const c=Math.cos(a),s=Math.sin(a);return V(v.x*c+v.z*s,v.y,-v.x*s+v.z*c)}
+const hex2v=h=>V(parseInt(h.slice(1,3),16)/255,parseInt(h.slice(3,5),16)/255,parseInt(h.slice(5,7),16)/255);
+const v2hex=c=>'#'+[c.x,c.y,c.z].map(t=>Math.round(clamp(t,0,1)*255).toString(16).padStart(2,'0')).join('');
+const cp=o=>JSON.parse(JSON.stringify(o)),$=id=>document.getElementById(id),DEG=180/Math.PI;
+const COL={x:'#ff6060',y:'#60ff60',z:'#6090ff'};
+
+// ================= scene =================
+function mat(name,col,o){return Object.assign({name,col,col2:V(.1,.1,.1),tex:'none',texScale:4,diff:.8,spec:.5,pow:50,refl:0,trans:0,ior:1.5,metal:false},o)}
+function obj(name,type,p,r,m,rot=0){return{name,type,p,r,rot,mat:m,keys:[],home:{p:{...p},r,rot}}}
+function defaultScene(){
+ const objs=[obj('GlassBall','sphere',V(0,1,0),1,'glass'),obj('ChromeBall','sphere',V(-2.3,.8,1.2),.8,'chrome'),
+  obj('RedBall','sphere',V(2.2,.7,1.5),.7,'plastic'),obj('GoldCube','box',V(1.6,.6,-1.6),.6,'gold',.5),
+  obj('MarbleCube','box',V(-1.4,.5,-2),.5,'marble',-.3),obj('RubyBall','sphere',V(.6,.35,2.3),.35,'ruby')];
+ objs[2].keys=[{f:1,s:{x:2.2,y:.7,z:1.5,rot:0,r:.7}},{f:15,s:{x:2.6,y:2.2,z:.8,rot:0,r:.7}},{f:30,s:{x:2.2,y:.7,z:1.5,rot:0,r:.7}}];
+ return{name:'Untitled',
+ M:{glass:mat('Glass',V(.97,1,.98),{diff:0,spec:.9,pow:250,trans:1,ior:1.5}),
+  chrome:mat('Chrome',V(.9,.9,.95),{diff:.05,spec:1,pow:300,refl:.85}),
+  plastic:mat('RedPlastic',V(.85,.1,.08),{diff:.85,spec:.6,pow:60,refl:.08}),
+  gold:mat('Gold',V(1,.75,.3),{diff:.35,spec:.9,pow:80,refl:.55,metal:true}),
+  matte:mat('BlueMatte',V(.2,.35,.9),{diff:.9,spec:.05,pow:5}),
+  marble:mat('Marble',V(.95,.93,.9),{col2:V(.25,.25,.32),tex:'marble',texScale:2,spec:.5,pow:80,refl:.1}),
+  ruby:mat('RubyGlass',V(1,.25,.3),{diff:0,spec:.9,pow:250,trans:.9,ior:1.6,refl:.05}),
+  stripes:mat('Candy',V(.95,.95,.95),{col2:V(.8,.1,.2),tex:'stripes',texScale:3,spec:.7,pow:90,refl:.1}),
+  floor:mat('Checker',V(.92,.92,.88),{col2:V(.08,.08,.1),tex:'checker',texScale:1,diff:.9,spec:.3,pow:40,refl:.2})},
+ objs,
+ light:{p:V(-4,7,5),col:V(1,.98,.92),int:1,amb:.12,shadows:true,soft:false,rad:.5,keys:[]},
+ cam:{t:V(0,.8,0),yaw:.35,pitch:.32,dist:8,zoom:2.2,keys:[]},
+ first:1,last:30,fps:15,frame:1,depth:6,aa:2,resW:640,resH:400,
+ fog:true,fogMin:25,fogMax:80,skyTop:V(.15,.25,.55),skyHor:V(.55,.6,.7),flare:false,
+ grid:2,snap:false,shadeView:false,autoKey:true};
+}
+let S=defaultScene();
+const VCAM0={t:V(0,.8,0),yaw:.6,pitch:.45,dist:12,zoom:2.2};
+let vcam=cp(VCAM0),sel=0,editMode='object',viewMode='persp',mouseMode='move',axOn={x:1,y:1,z:1},bgImg=null;
+const RT={depth:6,soft:false,bg:null,fog:true,px:0,py:0};
+
+// ================= ray tracing =================
+function hitSphere(o,ro,rd){const oc=sub(ro,o.p),b=dot(oc,rd),c=dot(oc,oc)-o.r*o.r,h=b*b-c;if(h<0)return -1;
+ const s=Math.sqrt(h);let t=-b-s;if(t>1e-4)return t;t=-b+s;return t>1e-4?t:-1}
+function hitBox(o,ro,rd){const lo=rotY(sub(ro,o.p),-o.rot),ld=rotY(rd,-o.rot),r=o.r;let tn=-1e30,tf=1e30;
+ for(const k of AX){if(Math.abs(ld[k])<1e-12){if(lo[k]<-r||lo[k]>r)return -1;continue}
+  const inv=1/ld[k];let t1=(-r-lo[k])*inv,t2=(r-lo[k])*inv;if(t1>t2){const t=t1;t1=t2;t2=t}
+  if(t1>tn)tn=t1;if(t2<tf)tf=t2;if(tn>tf)return -1}
+ if(tf<1e-4)return -1;return tn>1e-4?tn:tf}
+const hitObj=(o,ro,rd)=>o.type==='sphere'?hitSphere(o,ro,rd):hitBox(o,ro,rd);
+function normalAt(o,p){if(o.type==='sphere')return norm(sub(p,o.p));
+ const d=rotY(sub(p,o.p),-o.rot),a=V(Math.abs(d.x),Math.abs(d.y),Math.abs(d.z));let n;
+ if(a.x>a.y&&a.x>a.z)n=V(Math.sign(d.x),0,0);else if(a.y>a.z)n=V(0,Math.sign(d.y),0);else n=V(0,0,Math.sign(d.z));return rotY(n,o.rot)}
+function trace(ro,rd){let best=1e9,ho=null;
+ for(const o of S.objs){const t=hitObj(o,ro,rd);if(t>0&&t<best){best=t;ho=o}}
+ if(rd.y<-1e-6){const t=-ro.y/rd.y;if(t>1e-4&&t<best){best=t;ho='floor'}}
+ return ho?{t:best,o:ho}:null}
+function sky(rd){if(rd.y<0)return mul(S.skyHor,.85);const t=Math.pow(rd.y,.6);return add(mul(S.skyHor,1-t),mul(S.skyTop,t))}
+function noise(p){return Math.sin(p.x*1.3+Math.sin(p.y*2.1+p.z*.7))*Math.cos(p.z*1.7+Math.sin(p.x*2.9))+.5*Math.sin(p.y*3.1+p.x*1.1)*Math.cos(p.z*2.3)}
+function texCol(m,lp){const s=m.texScale;switch(m.tex){
+ case'checker':return((Math.floor(lp.x*s+1e-4)+Math.floor(lp.y*s+1e-4)+Math.floor(lp.z*s+1e-4))&1)?m.col2:m.col;
+ case'stripes':return Math.sin(lp.y*s*Math.PI*2)>0?m.col2:m.col;
+ case'marble':{const q=mul(lp,s),t=.5+.5*Math.sin(q.x*3+q.y*2+3*noise(q)+1.5*noise(mul(q,2.3)));return add(mul(m.col,t),mul(m.col2,1-t))}
+ default:return m.col}}
+function shadowAt(p){const L0=S.light,n=RT.soft?4:1;let tot=0;
+ for(let i=0;i<n;i++){let lp=L0.p;if(RT.soft){const r=L0.rad*2;lp=add(lp,V((Math.random()-.5)*r,(Math.random()-.5)*r,(Math.random()-.5)*r))}
+  const L=sub(lp,p),d=len(L),ld=mul(L,1/d);let att=1;
+  for(const o of S.objs){const t=hitObj(o,p,ld);if(t>0&&t<d){att*=S.M[o.mat].trans*.8;if(att<=0)break}}
+  tot+=att}
+ return tot/n}
+function shade(ro,rd,depth){
+ const h=trace(ro,rd);
+ if(!h)return(depth===0&&RT.bg)?RT.bg():sky(rd);
+ const p=add(ro,mul(rd,h.t));let n,m,lp;
+ if(h.o==='floor'){n=V(0,1,0);m=S.M.floor;lp=V(p.x,.001,p.z)}
+ else{m=S.M[h.o.mat];n=normalAt(h.o,p);lp=rotY(sub(p,h.o.p),-h.o.rot)}
+ let c=surface(p,n,rd,m,texCol(m,lp),depth);
+ if(RT.fog&&S.fog){const f=clamp((h.t-S.fogMin)/Math.max(.01,S.fogMax-S.fogMin),0,1);if(f>0)c=add(mul(c,1-f),mul(sky(rd),f))}
+ return c}
+function surface(p,n,rd,m,base,depth){
+ const into=dot(rd,n)<0,nn=into?n:mul(n,-1),L=S.light,Lc=mul(L.col,L.int),ld=norm(sub(L.p,p));
+ const sh=L.shadows?shadowAt(add(p,mul(nn,1e-3))):1;
+ const diff=Math.max(0,dot(nn,ld))*sh,hv=norm(sub(ld,rd)),sp=m.spec*Math.pow(Math.max(0,dot(nn,hv)),m.pow)*sh;
+ let c=cm(base,add(V(L.amb,L.amb,L.amb),mul(Lc,m.diff*diff)));
+ if(m.refl>0&&depth<RT.depth){const r=shade(add(p,mul(nn,1e-3)),refl(rd,nn),depth+1);c=add(mul(c,1-m.refl),mul(m.metal?cm(r,base):r,m.refl))}
+ if(m.trans>0){let gl;
+  if(depth<RT.depth){const eta=into?1/m.ior:m.ior,cosi=-dot(rd,nn),k=1-eta*eta*(1-cosi*cosi);
+   const r0=((1-m.ior)/(1+m.ior))**2,fr=r0+(1-r0)*Math.pow(1-cosi,5);
+   const rcol=shade(add(p,mul(nn,1e-3)),refl(rd,nn),depth+1);
+   if(k<0)gl=rcol;else{const td=norm(add(mul(rd,eta),mul(nn,eta*cosi-Math.sqrt(k))));
+    gl=add(mul(rcol,fr),mul(cm(shade(sub(p,mul(nn,1e-3)),td,depth+1),base),1-fr))}
+  }else gl=cm(sky(rd),base);
+  c=add(mul(c,1-m.trans),mul(gl,m.trans))}
+ return add(c,cm(m.metal?base:V(1,1,1),mul(Lc,sp)))}
+const gam=v=>Math.min(255,Math.pow(Math.max(0,v),1/1.8)*255);
+
+</script><script>
+// ================= cameras / views =================
+function lookB(pos,tgt,ht){const f=norm(sub(tgt,pos));let r=cross(f,V(0,1,0));r=len(r)<1e-6?V(1,0,0):norm(r);return{pos,f,r,u:cross(r,f),ht}}
+function orbitBasis(c,ht){const k=Math.cos(c.pitch);
+ return lookB(add(c.t,V(Math.sin(c.yaw)*k*c.dist,Math.sin(c.pitch)*c.dist,Math.cos(c.yaw)*k*c.dist)),c.t,ht||1/c.zoom)}
+const VW=660,VH=440;let VB,VS;
+function viewBasis(){
+ if(viewMode==='persp')return orbitBasis(vcam);
+ if(viewMode==='camera'){const ar=S.resW/S.resH,av=VW/VH;return orbitBasis(S.cam,ar>av?(1/S.cam.zoom)*ar/av:1/S.cam.zoom)}
+ if(viewMode==='light')return lookB(S.light.p,S.cam.t,.75);
+ return{ortho:viewMode,t:vcam.t,sc:VH/(vcam.dist*1.4)}}
+function setVB(){VB=viewBasis();VS=VB.ortho?0:VH/2/VB.ht}
+const toCam=p=>{const d=sub(p,VB.pos);return V(dot(d,VB.r),dot(d,VB.u),dot(d,VB.f))};
+function project(p){
+ if(VB.ortho){const s=VB.sc,c=VB.t;
+  if(VB.ortho==='xy')return{x:VW/2+(p.x-c.x)*s,y:VH/2-(p.y-c.y)*s};
+  if(VB.ortho==='xz')return{x:VW/2+(p.x-c.x)*s,y:VH/2+(p.z-c.z)*s};
+  return{x:VW/2+(p.z-c.z)*s,y:VH/2-(p.y-c.y)*s}}
+ const c=toCam(p);if(c.z<.05)return null;return{x:VW/2+c.x*VS/c.z,y:VH/2-c.y*VS/c.z}}
+function viewRay(mx,my){
+ if(VB.ortho){const s=VB.sc,c=VB.t,a=(mx-VW/2)/s,b=(my-VH/2)/s;
+  if(VB.ortho==='xy')return{ro:V(c.x+a,c.y-b,c.z+100),rd:V(0,0,-1)};
+  if(VB.ortho==='xz')return{ro:V(c.x+a,c.y+100,c.z+b),rd:V(0,-1,0)};
+  return{ro:V(c.x-100,c.y-b,c.z+a),rd:V(1,0,0)}}
+ return{ro:VB.pos,rd:norm(add(VB.f,add(mul(VB.r,(mx-VW/2)/VS),mul(VB.u,(VH/2-my)/VS))))}}
+function groundAt(m,y){const{ro,rd}=viewRay(m.x,m.y);if(Math.abs(rd.y)<1e-4)return null;const t=(y-ro.y)/rd.y;return t<0||t>500?null:add(ro,mul(rd,t))}
+
+// ================= items & keyframes =================
+function curItem(){
+ if(editMode==='object')return S.objs[sel]?{k:'obj',o:S.objs[sel]}:null;
+ if(editMode==='light')return{k:'light',o:S.light};
+ if(editMode==='camera')return{k:'cam',o:S.cam};
+ return{k:'view',o:vcam}}
+const itemName=it=>it.k==='obj'?it.o.name:it.k==='light'?'Light':it.k==='cam'?'Camera':'(view)';
+const itemPos=it=>it.k==='cam'?orbitBasis(it.o).pos:it.k==='view'?it.o.t:it.o.p;
+function stateOf(it){const o=it.o;
+ if(it.k==='obj')return{x:o.p.x,y:o.p.y,z:o.p.z,rot:o.rot,r:o.r};
+ if(it.k==='light')return{x:o.p.x,y:o.p.y,z:o.p.z};
+ return{x:o.t.x,y:o.t.y,z:o.t.z,yaw:o.yaw,pitch:o.pitch,dist:o.dist}}
+function applyState(it,s){const o=it.o;
+ if(it.k==='cam'||it.k==='view'){o.t=V(s.x,s.y,s.z);o.yaw=s.yaw;o.pitch=s.pitch;o.dist=s.dist}
+ else{o.p=V(s.x,s.y,s.z);if(it.k==='obj'){o.rot=s.rot;o.r=s.r}}}
+const CR=(a,b,c,d,t)=>.5*(2*b+(-a+c)*t+(2*a-5*b+4*c-d)*t*t+(-a+3*b-3*c+d)*t*t*t);
+function interp(keys,f){if(!keys||!keys.length)return null;const n=keys.length;
+ if(f<=keys[0].f)return keys[0].s;if(f>=keys[n-1].f)return keys[n-1].s;
+ let i=0;while(keys[i+1].f<=f)i++;const k1=keys[i],k2=keys[i+1],k0=keys[i-1]||k1,k3=keys[i+2]||k2,u=(f-k1.f)/(k2.f-k1.f),r={};
+ for(const c in k1.s)r[c]=CR(k0.s[c],k1.s[c],k2.s[c],k3.s[c],u);return r}
+const allItems=()=>[...S.objs.map(o=>({k:'obj',o})),{k:'light',o:S.light},{k:'cam',o:S.cam}];
+function setFrame(f){S.frame=clamp(Math.round(f),S.first,S.last);
+ for(const it of allItems()){const s=interp(it.o.keys,S.frame);if(s){applyState(it,s);if(it.k==='obj')sanitize(it.o)}}syncFrame();draw()}
+function setKey(it){if(!it||!it.o.keys)return;const s=stateOf(it),k=it.o.keys,i=k.findIndex(q=>q.f===S.frame);
+ if(i>=0)k[i].s=s;else{k.push({f:S.frame,s});k.sort((a,b)=>a.f-b.f)}status(`Key created for ${itemName(it)} at frame ${S.frame}`)}
+function delKey(it){if(!it||!it.o.keys)return;const i=it.o.keys.findIndex(q=>q.f===S.frame);
+ if(i>=0){it.o.keys.splice(i,1);status(`Key deleted at frame ${S.frame}`)}else status(`No key at frame ${S.frame}`)}
+function keyCmd(addK){const it=curItem();if(!it||it.k==='view'){status('Select an object, light or camera');return}addK?setKey(it):delKey(it);draw()}
+const countKeys=()=>allItems().reduce((a,it)=>a+it.o.keys.length,0);
+function sanitize(o){o.r=Math.max(.05,o.r);if(o.p.y<o.r)o.p.y=o.r}
+function moveItem(it,d){if(it.k==='cam'||it.k==='view')it.o.t=add(it.o.t,d);else it.o.p=add(it.o.p,d);if(it.k==='obj')sanitize(it.o)}
+function rotItem(it,dx,dy){if(it.k==='obj')it.o.rot+=dx*.01;else if(it.k==='light')it.o.p=rotY(it.o.p,dx*.01);
+ else{it.o.yaw-=dx*.01;it.o.pitch=clamp(it.o.pitch+dy*.01,-1.4,1.5)}}
+function sizeItem(it,a){if(it.k==='obj'){it.o.r*=Math.exp(a);sanitize(it.o)}else if(it.k==='light')it.o.int=clamp(it.o.int*Math.exp(a),0,5);
+ else it.o.dist=clamp(it.o.dist*Math.exp(-a),1,80)}
+function afterEdit(it){if(!it||it.k==='view')return;
+ if(S.snap&&mouseMode==='move'){const g=S.grid/4,p=it.k==='cam'?it.o.t:it.o.p;for(const k of AX)p[k]=Math.round(p[k]/g)*g;if(it.k==='obj')sanitize(it.o)}
+ if(S.autoKey&&it.o.keys.length)setKey(it)}
+
+// ================= undo =================
+const undoStack=[];
+function pushUndo(){undoStack.push(JSON.stringify({objs:S.objs,light:S.light,cam:S.cam,M:S.M}));if(undoStack.length>60)undoStack.shift()}
+function undo(){if(!undoStack.length){status('Nothing to undo');return}Object.assign(S,JSON.parse(undoStack.pop()));sel=Math.min(sel,Math.max(0,S.objs.length-1));status('Undo');draw()}
+
+// ================= object commands =================
+function addObj(type,gp,size){pushUndo();const r=size||(type==='sphere'?.5:.4),n=S.objs.filter(o=>o.type===type).length+1;
+ const o=obj((type==='sphere'?'Sphere':'Box')+n,type,V(gp?gp.x:0,r,gp?gp.z:2.5),r,type==='sphere'?'plastic':'matte');
+ S.objs.push(o);sel=S.objs.length-1;setEdit('object');status('Added '+o.name)}
+function dropPhysics(o,opt={}){if(!o)return;pushUndo();
+ const g=9.81,e=opt.bounce??.62,dt=1/S.fps,NS=20,fr=.985;let p={...o.p},v=V(opt.vx??.6,0,opt.vz??.3),rot=o.rot;o.keys=[];
+ for(let f=S.first;f<=S.last;f++){o.keys.push({f,s:{x:p.x,y:p.y,z:p.z,rot,r:o.r}});
+  for(let i=0;i<NS;i++){const h=dt/NS;v.y-=g*h;p=add(p,mul(v,h));
+   if(p.y<o.r){p.y=o.r;v.y=-v.y*e;v.x*=fr;v.z*=fr;if(Math.abs(v.y)<.25)v.y=0}
+   for(const q of S.objs){if(q===o)continue;let n,c;
+    if(q.type==='sphere'){const d=sub(p,q.p),dl=len(d);if(dl>=o.r+q.r||dl<1e-9)continue;n=mul(d,1/dl);p=add(q.p,mul(n,o.r+q.r))}
+    else{const lp=rotY(sub(p,q.p),-q.rot);c=V(clamp(lp.x,-q.r,q.r),clamp(lp.y,-q.r,q.r),clamp(lp.z,-q.r,q.r));
+     const d=sub(lp,c),dl=len(d);if(dl>=o.r)continue;n=rotY(dl<1e-9?V(0,1,0):mul(d,1/dl),q.rot);p=add(add(q.p,rotY(c,q.rot)),mul(n,o.r))}
+    const vn=dot(v,n);if(vn<0){v=sub(v,mul(n,(1+e)*vn));v=add(mul(sub(v,mul(n,dot(v,n))),fr),mul(n,dot(v,n)))}}
+   rot+=(o.type==='sphere'?-v.x/o.r:0)*h}}
+ setFrame(S.frame);status(`Physics (with collisions): ${o.name} dropped - ${o.keys.length} keys baked (gravity 9.81, bounce ${e})`)}
+function cloneSel(){const o=S.objs[sel];if(editMode!=='object'||!o)return;pushUndo();const c=cp(o);c.name=o.name+'_clone';c.p.x+=o.r*2.3;c.keys=[];c.home={p:{...c.p},r:c.r,rot:c.rot};
+ S.objs.push(c);sel=S.objs.length-1;status('Cloned '+o.name);draw()}
+function delSel(){const o=S.objs[sel];if(editMode!=='object'||!o)return;pushUndo();S.objs.splice(sel,1);sel=Math.max(0,Math.min(sel,S.objs.length-1));status('Deleted '+o.name+'  (Ctrl+Z to undo)');draw()}
+function center(){const it=curItem();if(!it||it.k==='view')return;const tc=viewMode==='camera'?S.cam:vcam;tc.t={...itemPos(it)};draw()}
+function resetItem(){const it=curItem();if(!it)return;pushUndo();
+ if(it.k==='obj'){const h=it.o.home;it.o.p={...h.p};it.o.r=h.r;it.o.rot=h.rot}
+ else if(it.k==='light')it.o.p=V(-4,7,5);
+ else if(it.k==='cam')Object.assign(it.o,{t:V(0,.8,0),yaw:.35,pitch:.32,dist:8,zoom:2.2});
+ else vcam=cp(VCAM0);
+ afterEdit(it);status('Reset '+itemName(it));draw()}
+
+// ================= UI building =================
+const app=$('app'),groups={};
+function el(cls,txt,x,y,w,fn){const d=document.createElement('div');d.className=cls;d.textContent=txt;Object.assign(d.style,{position:'absolute',left:x+'px',top:y+'px'});if(w)d.style.width=w+'px';if(fn)d.onclick=fn;app.appendChild(d);return d}
+function radio(g,txt,x,y,w,val,fn){const b=el('btn',txt,x,y,w,()=>fn(val));b.dataset.v=val;(groups[g]=groups[g]||[]).push(b);return b}
+function setRadio(g,v){groups[g].forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
+function setView(v){viewMode=v;setRadio('v',v);draw()}
+function setEdit(v){editMode=v;setRadio('e',v);draw()}
+function setMouse(v){mouseMode=v;setRadio('m',v);draw()}
+
+const TABS=[['Scene',()=>scenePanel()],['Objects',()=>objectsPanel()],['Surfaces',()=>surfacesPanel()],['Images',()=>imagesPanel()],['Lights',()=>lightsPanel()],
+ ['Camera',()=>cameraPanel()],['Effects',()=>effectsPanel()],['Record',()=>recordPanel()],['Options',()=>optionsPanel()],['SN',()=>snPanel()]];
+TABS.reduce((x,[t,fn])=>{el('btn',t,x,4,t.length*8+10,fn);return x+t.length*8+15},6);
+el('btn','Modeler',808,4,80,()=>modelerPanel()).style.color='#555';
+el('btn','Quit',14,36,180,()=>quit());
+el('sep','',6,60,200);el('lbl','View',14,64,184);
+radio('v','XY',14,80,52,'xy',setView);radio('v','XZ',72,80,52,'xz',setView);radio('v','ZY',130,80,64,'zy',setView);
+radio('v','Perspective',14,100,180,'persp',setView);
+radio('v','Light',14,120,86,'light',setView);radio('v','Camera',108,120,86,'camera',setView);
+el('sep','',6,144,200);el('lbl','Edit',14,148,184);
+radio('e','View',14,164,180,'view',setEdit);
+radio('e','Object',14,184,86,'object',setEdit);
+el('btn','Bone',108,184,86,()=>req('Bones',b=>note(b,`Object "${S.objs[sel]?S.objs[sel].name:'-'}" has no bones.\n\nBones deform polygon meshes built in Modeler.\nThis scene uses analytic primitives (spheres and\nboxes) which are moved as rigid objects instead.`)));
+radio('e','Light',14,204,86,'light',setEdit);radio('e','Camera',108,204,86,'camera',setEdit);
+el('sep','',6,228,200);el('lbl','Mouse',14,232,184);
+radio('m','Move',14,248,52,'move',setMouse);radio('m','Rotate',72,248,56,'rotate',setMouse);radio('m','Size',134,248,60,'size',setMouse);
+el('btn','Zoom Factor',14,276,180,()=>zoomFactor());
+const axB={};AX.forEach((a,i)=>{axB[a]=el('btn',a.toUpperCase(),[14,72,130][i],296,i==2?64:52,()=>{axOn[a]=axOn[a]?0:1;draw()})});
+el('btn','Reset',14,324,86,resetItem);el('btn','Center',108,324,86,center);
+el('btn','Numeric Input',14,344,180,()=>numeric());
+el('btn','Motion Graph',14,364,180,()=>motionGraph());
+el('sep','',6,388,200);el('lbl','Surface',14,392,184);
+const surfF=el('field','',14,410,180,()=>surfacesPanel());surfF.style.cursor='pointer';
+el('btn','Next Surface',14,432,180,()=>{const o=S.objs[sel];if(!o)return;pushUndo();const ks=Object.keys(S.M).filter(k=>k!=='floor');o.mat=ks[(ks.indexOf(o.mat)+1)%ks.length];draw()});
+el('btn','Add Sphere',14,452,86,()=>addObj('sphere'));el('btn','Add Box',108,452,86,()=>addObj('box'));
+el('btn','Clone',14,472,86,cloneSel);el('btn','Delete',108,472,86,delSel);
+el('btn','Undo',14,492,180,undo);
+el('sep','',6,516,200);
+const shadeB=el('btn','Quickshade',14,526,180,()=>{S.shadeView=!S.shadeView;draw()});
+el('btn','Preview  ▼',14,590,180,e=>{const r=e.target.getBoundingClientRect();menu(r.left,r.bottom,[
+ ['Quick Render (half res)',()=>doRender(true)],['Play Wireframe Preview',()=>togglePlay(true)],['Stop Preview',()=>togglePlay(false)],'-',
+ ['Toggle Quickshade',()=>{S.shadeView=!S.shadeView;draw()}]])});
+el('btn','Render',14,616,180,()=>doRender(false));
+
+const statusEl=el('lbl','',222,488,660);statusEl.style.cssText+='text-align:left;font-weight:normal;color:#111';
+const HINT='Left-drag: edit item | gizmo arrows: axis | Right-click: menu | Right-drag: orbit | Wheel: zoom';
+let stT;function status(t){statusEl.textContent=t;clearTimeout(stT);stT=setTimeout(()=>statusEl.textContent=HINT,3500)}
+el('lbl','Selected Item',220,510,120).style.textAlign='left';
+const selBtn=el('btn','',344,508,330,e=>{const r=selBtn.getBoundingClientRect();menu(r.left,r.bottom,[
+ {h:'Select Item'},{h:'-- (view) --'},['(view)',()=>setEdit('view')],...S.objs.map((o,i)=>[o.name,()=>{sel=i;setEdit('object')}]),['Light',()=>setEdit('light')],['Camera',()=>setEdit('camera')]].filter(x=>!(x.h&&x.h.startsWith('--'))))});
+const gridF=el('field','',690,508,186,()=>{const gs=[.5,1,2,5];S.grid=gs[(gs.indexOf(S.grid)+1)%gs.length];draw()});gridF.style.cursor='pointer';
+el('lbl','Current Frame',220,532,120).style.textAlign='left';
+const frameIn=document.createElement('input');frameIn.type='number';Object.assign(frameIn.style,{position:'absolute',left:'344px',top:'530px',width:'54px',color:'#e0c870'});
+frameIn.onchange=()=>setFrame(+frameIn.value);app.appendChild(frameIn);
+el('btn','◀',404,530,22,()=>setFrame(S.frame-1));el('btn','▶',430,530,22,()=>setFrame(S.frame+1));
+const slider=document.createElement('input');slider.type='range';Object.assign(slider.style,{position:'absolute',left:'458px',top:'530px',width:'216px'});
+slider.oninput=()=>setFrame(+slider.value);app.appendChild(slider);
+el('btn','Create Key',220,556,110,()=>keyCmd(1));el('btn','Delete Key',336,556,110,()=>keyCmd(0));
+const playB=el('btn','Play',452,556,100,()=>togglePlay());
+const autoB=el('btn','Auto Key',558,556,116,()=>{S.autoKey=!S.autoKey;draw()});
+const posBox=el('field','',690,532,186);Object.assign(posBox.style,{height:'84px',lineHeight:'19px'});
+el('lbl','t/y/h: move/rotate/size  n: numeric  Enter: key  Del  Ctrl+Z/D  F9: render  1-6: views',220,584,456).style.cssText+='font-weight:normal;font-size:11px;text-align:left';
+el('lbl','LightWave 3D 5.5',220,640,660);
+function syncFrame(){frameIn.value=S.frame;slider.min=S.first;slider.max=S.last;slider.value=S.frame}
+let playT=null;
+function togglePlay(on){if(on===undefined)on=!playT;clearInterval(playT);playT=null;
+ if(on)playT=setInterval(()=>setFrame(S.frame>=S.last?S.first:S.frame+1),1000/S.fps);draw()}
+
+// ================= viewport drawing =================
+const cv=document.createElement('canvas');cv.id='view';cv.width=VW;cv.height=VH;app.appendChild(cv);
+const g=cv.getContext('2d'),qc=document.createElement('canvas'),QF=5;qc.width=VW/QF;qc.height=VH/QF;const qx=qc.getContext('2d');
+let gizmoH=[],pend=false;
+function draw(){if(!pend){pend=true;requestAnimationFrame(()=>{pend=false;drawNow()})}}
+function line(a,b){let A,B;
+ if(VB.ortho){A=project(a);B=project(b)}
+ else{let p=toCam(a),q=toCam(b);const n=.05;if(p.z<n&&q.z<n)return;
+  if(p.z<n)p=add(p,mul(sub(q,p),(n-p.z)/(q.z-p.z)));else if(q.z<n)q=add(q,mul(sub(p,q),(n-q.z)/(p.z-q.z)));
+  A={x:VW/2+p.x*VS/p.z,y:VH/2-p.y*VS/p.z};B={x:VW/2+q.x*VS/q.z,y:VH/2-q.y*VS/q.z}}
+ if(!A||!B)return;g.beginPath();g.moveTo(A.x,A.y);g.lineTo(B.x,B.y);g.stroke()}
+function wire(o){
+ if(o.type==='sphere'){const N=12,P=(ph,t)=>add(o.p,rotY(V(o.r*Math.sin(ph)*Math.cos(t),o.r*Math.cos(ph),o.r*Math.sin(ph)*Math.sin(t)),o.rot)),A=Math.PI/6,B=2*Math.PI/N;
+  for(let a=1;a<6;a++)for(let b=0;b<N;b++)line(P(a*A,b*B),P(a*A,(b+1)*B));
+  for(let b=0;b<N;b++)for(let a=0;a<6;a++)line(P(a*A,b*B),P((a+1)*A,b*B))}
+ else{const r=o.r,c=[];for(let k=0;k<8;k++)c.push(add(o.p,rotY(V(k&1?r:-r,k&2?r:-r,k&4?r:-r),o.rot)));
+  [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]].forEach(([a,b])=>line(c[a],c[b]))}}
+function gizLen(c){if(VB.ortho)return 70/VB.sc;return Math.max(.05,dot(sub(c,VB.pos),VB.f))*70/VS}
+function drawGizmo(){gizmoH=[];const it=curItem();if(!it||it.k==='view')return;
+ if((it.k==='cam'&&viewMode==='camera')||(it.k==='light'&&viewMode==='light'))return;
+ const c=itemPos(it),C=project(c);if(!C)return;const L=gizLen(c);g.lineWidth=2;
+ if(mouseMode==='rotate'){g.strokeStyle='#f0e080';for(let i=0;i<32;i++)line(add(c,rotY(V(L,0,0),i*Math.PI/16)),add(c,rotY(V(L,0,0),(i+1)*Math.PI/16)))}
+ else for(const ax of AX){const v=V(0,0,0);v[ax]=L;const E=project(add(c,v));if(!E||Math.hypot(E.x-C.x,E.y-C.y)<8)continue;
+  const col=axOn[ax]?COL[ax]:'#777';g.strokeStyle=g.fillStyle=col;g.beginPath();g.moveTo(C.x,C.y);g.lineTo(E.x,E.y);g.stroke();
+  const ang=Math.atan2(E.y-C.y,E.x-C.x);
+  if(mouseMode==='size')g.fillRect(E.x-4,E.y-4,8,8);
+  else{g.beginPath();g.moveTo(E.x+Math.cos(ang)*8,E.y+Math.sin(ang)*8);g.lineTo(E.x+Math.cos(ang+2.5)*7,E.y+Math.sin(ang+2.5)*7);g.lineTo(E.x+Math.cos(ang-2.5)*7,E.y+Math.sin(ang-2.5)*7);g.fill()}
+  g.font='bold 11px monospace';g.fillText(ax.toUpperCase(),E.x+Math.cos(ang)*14-3,E.y+Math.sin(ang)*14+4);
+  gizmoH.push({ax,s:C,e:E,L})}
+ g.fillStyle='#f0e080';g.fillRect(C.x-3,C.y-3,6,6);g.lineWidth=1}
+function hitGizmo(m){for(const h of gizmoH){const dx=h.e.x-h.s.x,dy=h.e.y-h.s.y,l2=dx*dx+dy*dy,t=clamp(((m.x-h.s.x)*dx+(m.y-h.s.y)*dy)/l2,0,1.15);
+ if(t>.15&&Math.hypot(h.s.x+dx*t-m.x,h.s.y+dy*t-m.y)<7)return h}return null}
+function drawNow(){
+ setVB();
+ if(S.shadeView){const W=qc.width,H=qc.height,id=qx.createImageData(W,H);Object.assign(RT,{depth:3,soft:false,bg:null,fog:!VB.ortho});
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const{ro,rd}=viewRay((x+.5)*QF,(y+.5)*QF),c=shade(ro,rd,0),i=(y*W+x)*4;
+   id.data[i]=gam(c.x);id.data[i+1]=gam(c.y);id.data[i+2]=gam(c.z);id.data[i+3]=255}
+  qx.putImageData(id,0,0);g.imageSmoothingEnabled=true;g.drawImage(qc,0,0,VW,VH)}
+ else{g.fillStyle='#585858';g.fillRect(0,0,VW,VH)}
+ g.lineWidth=1;g.strokeStyle=S.shadeView?'rgba(0,0,0,.18)':'#454545';const sp=S.grid/2,N=12,e=N*sp;
+ for(let i=-N;i<=N;i++){const a=i*sp;
+  if(VB.ortho==='xy'){line(V(a,-e,0),V(a,e,0));line(V(-e,a,0),V(e,a,0))}
+  else if(VB.ortho==='zy'){line(V(0,a,-e),V(0,a,e));line(V(0,-e,a),V(0,e,a))}
+  else{line(V(a,0,-e),V(a,0,e));line(V(-e,0,a),V(e,0,a))}}
+ S.objs.forEach((o,i)=>{const isSel=editMode==='object'&&i===sel;if(S.shadeView&&!isSel)return;g.strokeStyle=isSel?'#f0e080':'#c8c8c8';wire(o)});
+ if(viewMode!=='light'){const L=project(S.light.p);if(L){g.strokeStyle=editMode==='light'?'#f0e080':'#e8e8e8';g.beginPath();g.arc(L.x,L.y,6,0,7);g.stroke();
+  for(let a=0;a<8;a++){const c=Math.cos(a*.785),s=Math.sin(a*.785);g.beginPath();g.moveTo(L.x+c*9,L.y+s*9);g.lineTo(L.x+c*14,L.y+s*14);g.stroke()}}}
+ if(viewMode!=='camera'){const b=orbitBasis(S.cam),q=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([x,y])=>add(b.pos,add(mul(b.f,.8),add(mul(b.r,x*.5),mul(b.u,y*.32)))));
+  g.strokeStyle=editMode==='camera'?'#f0e080':'#d0d0d0';q.forEach((p,i)=>{line(b.pos,p);line(p,q[(i+1)%4])});
+  line(add(q[2],mul(b.r,-.25)),add(b.pos,add(mul(b.f,.8),mul(b.u,.55))));line(add(q[3],mul(b.r,.25)),add(b.pos,add(mul(b.f,.8),mul(b.u,.55))));
+  if(editMode==='camera'){g.setLineDash([3,3]);line(b.pos,S.cam.t);g.setLineDash([])}}
+ if(viewMode==='camera'){const ar=S.resW/S.resH,w=ar>VW/VH?VW:VH*ar,h=w/ar;g.strokeStyle='#e0c870';g.setLineDash([6,4]);g.strokeRect((VW-w)/2+1,(VH-h)/2+1,w-2,h-2);g.setLineDash([])}
+ drawGizmo();
+ g.fillStyle='#ddd';g.font='bold 11px monospace';
+ g.fillText({persp:'Perspective',camera:'Camera View',light:'Light View',xy:'Back (XY)',xz:'Top (XZ)',zy:'Side (ZY)'}[viewMode]+(S.shadeView?'  [Quickshade]':'')+'   Frame '+S.frame+(playT?'  > PLAY':''),8,14);
+ // fields
+ const it=curItem(),so=S.objs[sel];
+ selBtn.textContent=(it?itemName(it):'(none)')+'  ▼';surfF.textContent=so?S.M[so.mat].name:'-';
+ const p=it?itemPos(it):V(0,0,0),hk=it&&it.o.keys&&it.o.keys.some(k=>k.f===S.frame),f3=v=>v.toFixed(3).padStart(9);
+ posBox.textContent=`${it&&it.k==='view'?'  Aimpoint':'  Position'}${hk?'   [KEY]':''}\nX:${f3(p.x)}\nY:${f3(p.y)}\nZ:${f3(p.z)}`;
+ gridF.textContent='Grid: '+S.grid.toFixed(1);shadeB.classList.toggle('on',S.shadeView);autoB.classList.toggle('on',S.autoKey);
+ playB.textContent=playT?'Stop':'Play';playB.classList.toggle('on',!!playT);AX.forEach(a=>axB[a].classList.toggle('on',!!axOn[a]))}
+
+// ================= mouse =================
+let drag=null;
+const mpos=e=>{const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)/UI-2,y:(e.clientY-r.top)/UI-2}};
+function pick(m){
+ if(viewMode!=='light'){const L=project(S.light.p);if(L&&Math.hypot(L.x-m.x,L.y-m.y)<12)return{k:'light',o:S.light}}
+ if(viewMode!=='camera'){const C=project(orbitBasis(S.cam).pos);if(C&&Math.hypot(C.x-m.x,C.y-m.y)<12)return{k:'cam',o:S.cam}}
+ const{ro,rd}=viewRay(m.x,m.y),h=trace(ro,rd);return h&&h.o!=='floor'?{k:'obj',o:h.o}:null}
+function selectItem(it){if(it.k==='obj'){sel=S.objs.indexOf(it.o);setEdit('object')}else setEdit(it.k==='light'?'light':'camera')}
+function pan(dx,dy){if(VB.ortho){const s=1/VB.sc,t=vcam.t;if(VB.ortho==='xy'){t.x-=dx*s;t.y+=dy*s}else if(VB.ortho==='xz'){t.x-=dx*s;t.z-=dy*s}else{t.z-=dx*s;t.y+=dy*s}return}
+ const tc=viewMode==='camera'?S.cam:vcam,w=tc.dist/VS;tc.t=add(tc.t,add(mul(VB.r,-dx*w),mul(VB.u,dy*w)))}
+document.addEventListener('contextmenu',e=>{if(!e.target.closest('input,select'))e.preventDefault()});
+cv.onmousedown=e=>{e.preventDefault();hideMenu();setVB();const m=mpos(e),base={sx:e.clientX,sy:e.clientY,x:e.clientX,y:e.clientY,m,moved:false};
+ if(e.button===2){drag={...base,type:'orbit',rclick:true};return}
+ if(e.button===1||(e.altKey&&e.ctrlKey)){drag={...base,type:'pan'};return}
+ if(e.altKey){drag={...base,type:'orbit'};return}
+ if(editMode==='view'){drag={...base,type:{move:'pan',rotate:'orbit',size:'zoom'}[mouseMode]};return}
+ let it=curItem();const gh=it&&mouseMode!=='rotate'?hitGizmo(m):null;
+ if(!gh){const p=pick(m);if(p){selectItem(p);it=curItem()}}
+ if(!it)return;pushUndo();
+ drag={...base,type:gh?'axis':'free',edit:true,it,gh,last:VB.ortho?null:groundAt(m,itemPos(it).y)};draw()};
+window.addEventListener('mousemove',e=>{if(!drag)return;const d=drag,dx=(e.clientX-d.x)/UI,dy=(e.clientY-d.y)/UI;d.x=e.clientX;d.y=e.clientY;
+ if(!d.moved&&Math.abs(e.clientX-d.sx)+Math.abs(e.clientY-d.sy)>3)d.moved=true;if(!d.moved)return;
+ setVB();const m=mpos(e),tc=viewMode==='camera'?S.cam:vcam;
+ if(d.type==='orbit'){if(VB.ortho)pan(dx,dy);else if(viewMode!=='light'){tc.yaw-=dx*.01;tc.pitch=clamp(tc.pitch+dy*.01,-1.4,1.5)}}
+ else if(d.type==='pan')pan(dx,dy);
+ else if(d.type==='zoom'){if(VB.ortho)vcam.dist=clamp(vcam.dist*Math.exp(dy*.01),1,80);else tc.dist=clamp(tc.dist*Math.exp(dy*.01),1,80)}
+ else if(d.type==='axis'){const h=d.gh,ex=h.e.x-h.s.x,ey=h.e.y-h.s.y,pl=Math.hypot(ex,ey),amt=(dx*ex+dy*ey)/pl/(pl/h.L);
+  if(mouseMode==='size')sizeItem(d.it,amt*.6);else{const v=V(0,0,0);v[h.ax]=amt;moveItem(d.it,v)}}
+ else if(d.type==='free'){const it=d.it;
+  if(mouseMode==='rotate')rotItem(it,dx,dy);
+  else if(mouseMode==='size')sizeItem(it,(dx-dy)*.01);
+  else{let v;const c=itemPos(it);
+   if(VB.ortho){const s=1/VB.sc;v=VB.ortho==='xy'?V(dx*s,-dy*s,0):VB.ortho==='xz'?V(dx*s,0,dy*s):V(0,-dy*s,dx*s)}
+   else{const w=Math.max(.1,dot(sub(c,VB.pos),VB.f))/VS;
+    if(e.shiftKey)v=V(0,-dy*w,0);
+    else{const hp=groundAt(m,c.y);if(hp&&d.last)v=sub(hp,d.last);
+     else{const rr=norm(V(VB.r.x,0,VB.r.z)),ff=norm(V(VB.f.x,0,VB.f.z));v=add(mul(rr,dx*w),mul(ff,-dy*w))}}}
+   moveItem(it,V(v.x*axOn.x,v.y*axOn.y,v.z*axOn.z));
+   if(!VB.ortho)d.last=groundAt(m,itemPos(it).y)}}
+ draw()});
+window.addEventListener('mouseup',e=>{if(!drag)return;const d=drag;drag=null;
+ if(d.rclick&&!d.moved){ctxMenu(e.clientX,e.clientY,d.m);return}
+ if(d.edit){if(!d.moved)undoStack.pop();else afterEdit(d.it)}draw()});
+cv.onwheel=e=>{e.preventDefault();setVB();const f=e.deltaY>0?1.1:.9;
+ if(VB.ortho||viewMode!=='camera')vcam.dist=clamp(vcam.dist*f,1,80);else S.cam.dist=clamp(S.cam.dist*f,1,80);draw()};
+
+// ================= menus =================
+function hideMenu(){document.querySelectorAll('.menu').forEach(m=>m.remove())}
+document.addEventListener('mousedown',e=>{if(!e.target.closest('.menu'))hideMenu()},true);
+function menu(x,y,items){hideMenu();const m=div('menu');
+ items.forEach(it=>{if(it==='-'){m.append(div('ms'));return}if(it.h){const h=div('mh');h.textContent=it.h;m.append(h);return}
+  const d=div('mi'+(it[2]?' dis':''));d.textContent=it[0];d.onclick=()=>{hideMenu();it[1]&&it[1]()};m.append(d)});
+ document.body.append(m);const r=m.getBoundingClientRect();m.style.left=Math.max(0,Math.min(x,innerWidth-r.width-4))+'px';m.style.top=Math.max(0,Math.min(y,innerHeight-r.height-4))+'px'}
+function ctxMenu(x,y,m){setVB();const it=pick(m),items=[];
+ if(it){selectItem(it);items.push({h:itemName(it)},['Move              t',()=>setMouse('move')],['Rotate            y',()=>setMouse('rotate')],['Size              h',()=>setMouse('size')],'-',
+  ['Numeric Input...  n',numeric],['Center View       c',center],['Reset Position',resetItem],'-',['Create Key    Enter',()=>keyCmd(1)],['Delete Key',()=>keyCmd(0)],['Motion Graph...',motionGraph]);
+  if(it.k==='obj'){items.push('-',{h:'Surface'});for(const k in S.M)if(k!=='floor')items.push([(it.o.mat===k?'● ':'  ')+S.M[k].name,()=>{pushUndo();it.o.mat=k;draw()}]);
+   items.push(['  Edit Surface...',surfacesPanel],'-',['Drop with Physics (bake keys)',()=>dropPhysics(it.o)],'-',['Clone        Ctrl+D',cloneSel],['Delete          Del',delSel])}
+  if(it.k==='light')items.push('-',['Light Properties...',lightsPanel],['View From Light',()=>setView('light')]);
+  if(it.k==='cam')items.push('-',['Camera Properties...',cameraPanel],['View Through Camera',()=>setView('camera')],['Copy Perspective to Camera',copyViewToCam])}
+ else{const gp=VB.ortho?null:groundAt(m,0);
+  items.push({h:'Layout'},['Add Sphere Here',()=>addObj('sphere',gp)],['Add Box Here',()=>addObj('box',gp)],'-',
+   ['Reset View',()=>{vcam=cp(VCAM0);draw()}],['Center on Origin',()=>{vcam.t=V(0,.8,0);draw()}],['Toggle Quickshade   q',()=>{S.shadeView=!S.shadeView;draw()}],
+   ['Undo           Ctrl+Z',undo,!undoStack.length],'-',['Quick Render        p',()=>doRender(true)],['Render Frame       F9',()=>doRender(false)],['Record Animation...',recordPanel])}
+ menu(x,y,items)}
+
+// ================= requesters =================
+let reqs=[];
+function div(c){const d=document.createElement('div');d.className=c;return d}
+function btn(l,fn){const b=document.createElement('span');b.className='btn';b.textContent=l;b.onclick=fn;return b}
+function req(title,build,buttons=[['Continue']],opt={}){
+ const ov=div('req'),w=div('win'),t=div('wt'),b=div('wb'),f=div('wf');t.textContent=title;w.append(t,b,f);ov.append(w);document.body.append(ov);
+ const R={body:b,close(){ov.remove();reqs=reqs.filter(x=>x!==R);opt.onClose&&opt.onClose();draw()},rebuild(){const s=b.scrollTop;b.innerHTML='';build(b,R);b.scrollTop=s}};
+ R.rebuild();buttons.forEach(([l,fn])=>f.append(btn(l,()=>{if(fn&&fn(R)===false)return;R.close()})));
+ let tx=0,ty=0;t.onmousedown=e=>{const sx=e.clientX-tx,sy=e.clientY-ty,mv=ev=>{tx=ev.clientX-sx;ty=ev.clientY-sy;w.style.transform=`translate(${tx}px,${ty}px)`},
+  up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up)};addEventListener('mousemove',mv);addEventListener('mouseup',up)};
+ reqs.push(R);return R}
+function row(p,label,e){const r=div('r'),l=document.createElement('label');l.textContent=label;r.append(l,e);p.append(r);return e}
+function inp(type,val){const i=document.createElement('input');i.type=type;if(val!==undefined)i.value=val;return i}
+function numF(p,label,get,set,step=.1){const i=inp('number',+(+get()).toFixed(3));i.step=step;i.style.width='100px';i.oninput=()=>{const v=parseFloat(i.value);if(isFinite(v)){set(v);draw()}};return row(p,label,i)}
+function txtF(p,label,get,set){const i=inp('text',get());i.style.width='170px';i.oninput=()=>{set(i.value);draw()};return row(p,label,i)}
+function colF(p,label,get,set){const i=inp('color',v2hex(get()));i.oninput=()=>{set(hex2v(i.value));draw()};return row(p,label,i)}
+function selF(p,label,opts,get,set){const s=document.createElement('select');opts.forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;s.append(o)});s.value=String(get());s.onchange=()=>{set(s.value);draw()};return row(p,label,s)}
+function chkF(p,label,get,set){const b=btn('',()=>{set(!get());upd();draw()}),upd=()=>{b.textContent=get()?'On':'Off';b.classList.toggle('on',!!get())};b.style.width='60px';upd();return row(p,label,b)}
+function btnRow(p,list){const r=div('r');r.style.flexWrap='wrap';list.forEach(([l,fn])=>r.append(btn(l,fn)));p.append(r);return r}
+function note(p,t){const d=div('note');d.textContent=t;p.append(d);return d}
+const surfOpts=()=>Object.keys(S.M).filter(k=>k!=='floor').map(k=>[k,S.M[k].name]);
+const RES=[[320,200,'320 x 200'],[640,400,'640 x 400'],[640,480,'640 x 480 (VGA)'],[800,600,'800 x 600 (SVGA)'],[1024,640,'1024 x 640']];
+const AAO=[[1,'Off (1 ray)'],[2,'Low (4 rays)'],[3,'Medium (9 rays)'],[4,'High (16 rays)']];
+
+function numeric(){const it=curItem();if(!it)return;pushUndo();
+ req('Numeric Input - '+itemName(it),b=>{const s=stateOf(it),ang={rot:'Heading (deg)',yaw:'Heading (deg)',pitch:'Pitch (deg)'};
+  const lab={x:'X',y:'Y',z:'Z',r:'Size',dist:'Distance'};
+  for(const k in s){if(ang[k])numF(b,ang[k],()=>s[k]*DEG,v=>{s[k]=v/DEG;applyState(it,s)},5);
+   else numF(b,(it.k==='cam'||it.k==='view')&&AX.includes(k)?'Target '+lab[k]:lab[k],()=>s[k],v=>{s[k]=v;applyState(it,s);if(it.k==='obj')sanitize(it.o)},.1)}},
+  [['OK',()=>afterEdit(it)],['Cancel',()=>undo()]])}
+function zoomFactor(){const tc=viewMode==='camera'?S.cam:vcam;
+ req('Zoom Factor',b=>{numF(b,'Zoom Factor',()=>tc.zoom,v=>tc.zoom=clamp(v,.3,20),.1);note(b,'Higher zoom = narrower field of view (telephoto).\n2.2 ≈ 49° vertical FOV, 3.2 ≈ 35°.\nApplies to the '+(tc===S.cam?'render camera.':'perspective view.'))})}
+function copyViewToCam(){pushUndo();Object.assign(S.cam,{t:{...vcam.t},yaw:vcam.yaw,pitch:vcam.pitch,dist:vcam.dist,zoom:vcam.zoom});afterEdit({k:'cam',o:S.cam});status('Camera set to perspective view');draw()}
+
+function scenePanel(){req('Scene',(b,R)=>{
+ txtF(b,'Scene Name',()=>S.name,v=>S.name=v);
+ numF(b,'First Frame',()=>S.first,v=>{S.first=Math.max(0,v|0);syncFrame()},1);
+ numF(b,'Last Frame',()=>S.last,v=>{S.last=Math.max(S.first+1,v|0);syncFrame()},1);
+ numF(b,'Frames Per Second',()=>S.fps,v=>S.fps=clamp(v|0,1,60),1);
+ numF(b,'Ray Recursion Limit',()=>S.depth,v=>S.depth=clamp(v|0,1,16),1);
+ note(b,`Objects: ${S.objs.length}   Surfaces: ${Object.keys(S.M).length}   Keyframes: ${countKeys()}`);
+ btnRow(b,[['Load Scene...',loadScene],['Save Scene',saveScene],['Clear Scene',()=>{pushUndo();S.objs=[];sel=0;R.rebuild();draw()}],
+  ['Default Scene',()=>{pushUndo();Object.assign(S,defaultScene());sel=0;setFrame(1);R.rebuild()}]])})}
+function loadScene(){const i=inp('file');i.accept='.json,.lws';i.onchange=async()=>{try{const d=JSON.parse(await i.files[0].text());pushUndo();Object.assign(S,defaultScene(),d);sel=0;setFrame(S.frame);reqs.slice().forEach(r=>r.close());status('Loaded scene '+S.name)}catch(err){status('Load failed: '+err.message)}};i.click()}
+function saveScene(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));a.download=(S.name||'scene')+'.lws.json';a.click();status('Scene saved')}
+
+function objectsPanel(){req('Objects',(b,R)=>{const o=S.objs[sel];
+ if(!o)note(b,'No objects in scene.');
+ else{selF(b,'Current Object',S.objs.map((q,i)=>[i,q.name]),()=>sel,v=>{sel=+v;setEdit('object');R.rebuild()});
+  txtF(b,'Object Name',()=>o.name,v=>o.name=v);
+  note(b,`Type: ${o.type==='sphere'?'Sphere (analytic)':'Box (6 polygons)'}    Keys: ${o.keys.length}`);
+  selF(b,'Surface',surfOpts(),()=>o.mat,v=>{pushUndo();o.mat=v});
+  numF(b,'Size',()=>o.r,v=>{o.r=Math.max(.05,v);sanitize(o)},.05);
+  numF(b,'Heading (deg)',()=>o.rot*DEG,v=>o.rot=v/DEG,5);
+  for(const k of AX)numF(b,'Position '+k.toUpperCase(),()=>o.p[k],v=>{o.p[k]=v;sanitize(o)},.1)}
+ btnRow(b,[['Add Sphere',()=>{addObj('sphere');R.rebuild()}],['Add Box',()=>{addObj('box');R.rebuild()}],['Clone',()=>{cloneSel();R.rebuild()}],
+  ['Delete',()=>{delSel();R.rebuild()}],['Drop (Physics)',()=>{dropPhysics(o);R.rebuild()}],['Create Key',()=>{setKey({k:'obj',o});R.rebuild()}],['Clear Keys',()=>{if(o){o.keys=[];R.rebuild()}}]])})}
+
+let curSurf='glass';
+function surfacesPanel(){const o=S.objs[sel];if(o)curSurf=o.mat;if(!S.M[curSurf])curSurf='floor';
+ req('Surfaces',(b,R)=>{const m=S.M[curSurf];
+  selF(b,'Surface',Object.keys(S.M).map(k=>[k,S.M[k].name+(k==='floor'?' (ground)':'')]),()=>curSurf,v=>{curSurf=v;R.rebuild()});
+  const wrap=div(''),L=div(''),sw=document.createElement('canvas');wrap.style.cssText='display:flex;gap:12px;align-items:flex-start';
+  sw.width=sw.height=120;sw.style.cssText='border:2px inset #999;margin-top:4px';wrap.append(L,sw);b.append(wrap);
+  txtF(L,'Surface Name',()=>m.name,v=>m.name=v);
+  colF(L,'Surface Color',()=>m.col,v=>m.col=v);
+  selF(L,'Texture',[['none','(none)'],['checker','Checkerboard'],['stripes','Stripes'],['marble','Marble']],()=>m.tex,v=>m.tex=v);
+  colF(L,'Texture Color',()=>m.col2,v=>m.col2=v);
+  numF(L,'Texture Scale',()=>m.texScale,v=>m.texScale=clamp(v,.1,50),.5);
+  numF(L,'Diffuse Level',()=>m.diff,v=>m.diff=clamp(v,0,1),.05);
+  numF(L,'Specular Level',()=>m.spec,v=>m.spec=clamp(v,0,2),.05);
+  numF(L,'Glossiness',()=>m.pow,v=>m.pow=clamp(v,1,1000),10);
+  numF(L,'Reflectivity',()=>m.refl,v=>m.refl=clamp(v,0,1),.05);
+  numF(L,'Transparency',()=>m.trans,v=>m.trans=clamp(v,0,1),.05);
+  numF(L,'Refractive Index',()=>m.ior,v=>m.ior=clamp(v,1,3),.05);
+  chkF(L,'Color Highlights',()=>m.metal,v=>m.metal=v);
+  btnRow(b,[['New Surface',()=>{const k='s'+Date.now()%1e6;S.M[k]=mat('NewSurface',V(.7,.7,.7),{});curSurf=k;R.rebuild()}],
+   ['Assign to '+(S.objs[sel]?S.objs[sel].name:'-'),()=>{const q=S.objs[sel];if(q&&curSurf!=='floor'){pushUndo();q.mat=curSurf;status(`${m.name} assigned to ${q.name}`);draw()}}],
+   ['Delete Surface',()=>{const used=S.objs.some(q=>q.mat===curSurf);if(curSurf==='floor'||used){status('Surface is in use');return}delete S.M[curSurf];curSurf='floor';R.rebuild()}]]);
+  let tm;const upd=()=>{clearTimeout(tm);tm=setTimeout(()=>swatch(sw,curSurf),40)};upd();b.addEventListener('input',upd);b.addEventListener('click',upd)})}
+function swatch(c,k){const ctx=c.getContext('2d'),W=c.width,H=c.height,id=ctx.createImageData(W,H),save=S.objs;
+ S.objs=k==='floor'?[]:[{type:'sphere',p:V(0,1,0),r:1,rot:0,mat:k}];Object.assign(RT,{depth:5,soft:false,bg:null,fog:false});
+ const b=lookB(V(0,1.9,3.6),V(0,.85,0),.6);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const rd=norm(add(b.f,add(mul(b.r,(x/W*2-1)*b.ht),mul(b.u,(1-y/H*2)*b.ht)))),cc=shade(b.pos,rd,0),i=(y*W+x)*4;
+  id.data[i]=gam(cc.x);id.data[i+1]=gam(cc.y);id.data[i+2]=gam(cc.z);id.data[i+3]=255}
+ S.objs=save;ctx.putImageData(id,0,0)}
+
+function imagesPanel(){req('Images',(b,R)=>{
+ note(b,bgImg?`Background Image: ${bgImg.name}  (${bgImg.img.width} x ${bgImg.img.height})`:'No images loaded.');
+ if(bgImg){const t=new Image();t.src=bgImg.img.src;t.style.cssText='max-width:260px;max-height:160px;border:2px inset #999;display:block';b.append(t)}
+ note(b,'A loaded image is used as the Background Image\nbehind the scene in rendered frames.');
+ btnRow(b,[['Load Image...',()=>{const i=inp('file');i.accept='image/*';i.onchange=()=>{const f=i.files[0],img=new Image();img.onload=()=>{bgImg={img,name:f.name};R.rebuild()};img.src=URL.createObjectURL(f)};i.click()}],
+  ['Test Pattern',()=>{const c=document.createElement('canvas');c.width=320;c.height=200;const x=c.getContext('2d'),gr=x.createLinearGradient(0,0,0,200);
+   gr.addColorStop(0,'#102060');gr.addColorStop(.6,'#c06040');gr.addColorStop(1,'#ffd080');x.fillStyle=gr;x.fillRect(0,0,320,200);
+   x.fillStyle='#fff8';for(let i=0;i<60;i++)x.fillRect(Math.random()*320,Math.random()*100,1,1);x.fillStyle='#ffe0a0';x.beginPath();x.arc(240,120,22,0,7);x.fill();
+   const img=new Image();img.onload=()=>{bgImg={img,name:'TestPattern'};R.rebuild()};img.src=c.toDataURL()}],
+  ['Clear Image',()=>{bgImg=null;R.rebuild()}]])})}
+
+function lightsPanel(){req('Lights',(b,R)=>{const L=S.light;
+ colF(b,'Light Color',()=>L.col,v=>L.col=v);
+ numF(b,'Light Intensity',()=>L.int,v=>L.int=clamp(v,0,5),.05);
+ numF(b,'Ambient Intensity',()=>L.amb,v=>L.amb=clamp(v,0,1),.02);
+ chkF(b,'Ray Trace Shadows',()=>L.shadows,v=>L.shadows=v);
+ chkF(b,'Soft (Area) Shadows',()=>L.soft,v=>L.soft=v);
+ numF(b,'Light Size',()=>L.rad,v=>L.rad=clamp(v,0,3),.05);
+ for(const k of AX)numF(b,'Position '+k.toUpperCase(),()=>L.p[k],v=>L.p[k]=v,.2);
+ chkF(b,'Lens Flare',()=>S.flare,v=>S.flare=v);
+ btnRow(b,[['Select Light',()=>setEdit('light')],['View From Light',()=>setView('light')],['Reset Light',()=>{pushUndo();L.p=V(-4,7,5);R.rebuild()}]])})}
+
+function cameraPanel(){req('Camera',(b,R)=>{const C=S.cam;
+ numF(b,'Zoom Factor',()=>C.zoom,v=>C.zoom=clamp(v,.3,20),.1);
+ selF(b,'Resolution',RES.map((r,i)=>[i,r[2]]),()=>RES.findIndex(r=>r[0]===S.resW&&r[1]===S.resH),v=>{S.resW=RES[+v][0];S.resH=RES[+v][1]});
+ selF(b,'Antialiasing',AAO,()=>S.aa,v=>S.aa=+v);
+ numF(b,'Distance',()=>C.dist,v=>C.dist=clamp(v,1,80),.2);
+ numF(b,'Heading (deg)',()=>C.yaw*DEG,v=>C.yaw=v/DEG,5);
+ numF(b,'Pitch (deg)',()=>C.pitch*DEG,v=>C.pitch=clamp(v/DEG,-1.4,1.5),5);
+ for(const k of AX)numF(b,'Target '+k.toUpperCase(),()=>C.t[k],v=>C.t[k]=v,.1);
+ btnRow(b,[['Select Camera',()=>setEdit('camera')],['View Through Camera',()=>setView('camera')],['Copy Perspective to Camera',()=>{copyViewToCam();R.rebuild()}]])})}
+
+function effectsPanel(){req('Effects',b=>{
+ colF(b,'Zenith Color',()=>S.skyTop,v=>S.skyTop=v);colF(b,'Horizon Color',()=>S.skyHor,v=>S.skyHor=v);
+ chkF(b,'Fog',()=>S.fog,v=>S.fog=v);
+ numF(b,'Fog Min Distance',()=>S.fogMin,v=>S.fogMin=Math.max(0,v),1);numF(b,'Fog Max Distance',()=>S.fogMax,v=>S.fogMax=Math.max(1,v),1);
+ chkF(b,'Lens Flare',()=>S.flare,v=>S.flare=v);
+ note(b,'The backdrop gradient is seen in reflections and\nrefractions. Fog blends distant surfaces into it.')})}
+
+let recRes=0,recAA=1;
+function recordPanel(){req('Record',(b,R)=>{
+ note(b,`Animation: frames ${S.first} to ${S.last} at ${S.fps} fps  (${S.last-S.first+1} frames, ${countKeys()} keys)`);
+ numF(b,'First Frame',()=>S.first,v=>{S.first=Math.max(0,v|0);syncFrame()},1);
+ numF(b,'Last Frame',()=>S.last,v=>{S.last=Math.max(S.first+1,v|0);syncFrame()},1);
+ selF(b,'Resolution',RES.map((r,i)=>[i,r[2]]),()=>recRes,v=>recRes=+v);
+ selF(b,'Antialiasing',AAO,()=>recAA,v=>recAA=+v);
+ btnRow(b,[['Record Animation',()=>{R.close();doRecord(RES[recRes][0],RES[recRes][1],recAA)}],['Render Frame',()=>{R.close();doRender(false)}],['Wireframe Preview',()=>{R.close();togglePlay(true)}]]);
+ note(b,'Tip: move to a frame, change an item and press Create Key.\nAuto Key updates existing animation as you edit.')},[['Close']])}
+
+function optionsPanel(){req('Options',b=>{
+ numF(b,'Grid Size',()=>S.grid,v=>S.grid=clamp(v,.25,20),.5);
+ chkF(b,'Snap To Grid',()=>S.snap,v=>S.snap=v);
+ chkF(b,'Quickshade Viewport',()=>S.shadeView,v=>S.shadeView=v);
+ chkF(b,'Auto Key',()=>S.autoKey,v=>S.autoKey=v);
+ note(b,`Mouse:  Left-drag        move / rotate / size selected item
+        Drag gizmo arrow move along one axis only
+        Shift+drag       move vertically
+        Right-drag/Alt   orbit view     Middle-drag  pan
+        Wheel            zoom           Right-click  menu
+Keys:   t y h   Move / Rotate / Size     n   Numeric Input
+        Enter   Create Key               Del Delete object
+        Ctrl+Z  Undo   Ctrl+D Clone      c   Center view
+        Left/Right frame  Space play     q   Quickshade
+        p Quick render  F9 Render  F10 Record
+        1-6  XY XZ ZY Perspective Light Camera`)})}
+function snPanel(){req('Serial Number',b=>note(b,'LightWave 3D  Layout 5.5\n\nSerial Number:  4E55-1997-00042\nHardware lock:  detected (parallel port)\nLicensed to:    Retro Render Studio\n\nRaytrace engine: 1 thread, double precision'))}
+function modelerPanel(){let t='sphere',sz=.5;req('Modeler',b=>{note(b,'Modeler runs as a separate program.\nQuick primitive tool:');
+ selF(b,'Primitive',[['sphere','Ball'],['box','Box']],()=>t,v=>t=v);numF(b,'Size',()=>sz,v=>sz=Math.max(.05,v),.1)},[['Make',()=>addObj(t,null,sz)],['Cancel']])}
+function quit(){req('Quit',b=>note(b,'Quit LightWave 3D Layout?\nUnsaved changes will be lost.'),[['Yes',()=>{togglePlay(false);app.innerHTML='';app.style.background='#000';
+ const d=el('lbl','LightWave 3D has exited.',0,280,900);d.style.color='#aaa';const r=el('btn','Restart Layout',375,320,150,()=>location.reload());}],['No']])}
+
+// ================= motion graph =================
+let mgChan='pos';
+function motionGraph(){const it=curItem();if(!it||it.k==='view'){status('Select an object, light or camera first');return}
+ req('Motion Graph - '+itemName(it),(b,R)=>{const chans=Object.keys(stateOf(it));if(mgChan!=='pos'&&!chans.includes(mgChan))mgChan='pos';
+  selF(b,'Channel',[['pos','Position X/Y/Z'],...chans.map(c=>[c,c.toUpperCase()])],()=>mgChan,v=>{mgChan=v;R.rebuild()});
+  const c=document.createElement('canvas');c.width=540;c.height=220;c.style.cssText='border:2px inset #999;display:block;cursor:pointer;margin:4px 0';b.append(c);
+  const x=c.getContext('2d'),show=mgChan==='pos'?['x','y','z']:[mgChan],n=Math.max(1,S.last-S.first),sm=[];
+  for(let f=S.first;f<=S.last;f++)sm.push(interp(it.o.keys,f)||stateOf(it));
+  let mn=1e9,mx=-1e9;sm.forEach(s=>show.forEach(ch=>{mn=Math.min(mn,s[ch]);mx=Math.max(mx,s[ch])}));if(mx-mn<1e-6){mn-=1;mx+=1}const pd=(mx-mn)*.1;mn-=pd;mx+=pd;
+  const X=f=>36+(f-S.first)/n*(c.width-46),Y=v=>c.height-18-(v-mn)/(mx-mn)*(c.height-30);
+  x.fillStyle='#3a3a3a';x.fillRect(0,0,c.width,c.height);x.strokeStyle='#4c4c4c';x.fillStyle='#bbb';x.font='10px monospace';
+  for(let f=S.first;f<=S.last;f+=5){x.beginPath();x.moveTo(X(f),6);x.lineTo(X(f),c.height-18);x.stroke();x.fillText(f,X(f)-4,c.height-5)}
+  x.fillText(mx.toFixed(2),2,14);x.fillText(mn.toFixed(2),2,c.height-20);
+  x.strokeStyle='#e0c870';x.beginPath();x.moveTo(X(S.frame),6);x.lineTo(X(S.frame),c.height-18);x.stroke();
+  show.forEach(ch=>{x.strokeStyle=x.fillStyle=COL[ch]||'#ddd';x.lineWidth=2;x.beginPath();sm.forEach((s,i)=>{const px=X(S.first+i),py=Y(s[ch]);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();x.lineWidth=1;
+   it.o.keys.forEach(k=>{if(k.f>=S.first&&k.f<=S.last)x.fillRect(X(k.f)-3,Y(k.s[ch])-3,7,7)})});
+  c.onclick=e=>{const r=c.getBoundingClientRect();setFrame(S.first+(e.clientX-r.left-36)/(c.width-46)*n);R.rebuild()};
+  note(b,`Keys at frames: ${it.o.keys.map(k=>k.f).join(', ')||'none'}     Current frame: ${S.frame}   (click graph to set frame)`);
+  btnRow(b,[['Create Key',()=>{setKey(it);R.rebuild()}],['Delete Key',()=>{delKey(it);R.rebuild()}],
+   ['Prev Key',()=>{const k=[...it.o.keys].reverse().find(k=>k.f<S.frame);if(k){setFrame(k.f);R.rebuild()}}],
+   ['Next Key',()=>{const k=it.o.keys.find(k=>k.f>S.frame);if(k){setFrame(k.f);R.rebuild()}}],['Clear All Keys',()=>{it.o.keys=[];R.rebuild()}]])})}
+
+// ================= rendering =================
+const rwin=$('rwin'),rc=$('rc'),rg=rc.getContext('2d',{willReadFrequently:true}),pfill=$('pfill'),rstat=$('rstat'),rplay=$('rplay');
+let job=0,playI=null,frames=[],fIdx=0;
+const nextFrame=()=>new Promise(r=>requestAnimationFrame(r));
+function openRW(){rwin.style.display='flex';stopPB();rplay.style.display='none'}
+async function renderFrameST(W,H,aa,prog){const id=job;rc.width=W;rc.height=H;rg.fillStyle='#000';rg.fillRect(0,0,W,H);
+ const b=orbitBasis(S.cam),asp=W/H,ht=b.ht,img=rg.createImageData(W,1);let bgd=null;
+ if(bgImg){const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.drawImage(bgImg.img,0,0,W,H);bgd=x.getImageData(0,0,W,H).data}
+ const cfg={depth:S.depth,soft:S.light.soft,fog:true,bg:bgd?()=>{const i=(RT.py*W+RT.px)*4;return V((bgd[i]/255)**1.8,(bgd[i+1]/255)**1.8,(bgd[i+2]/255)**1.8)}:null};
+ Object.assign(RT,cfg);let end=performance.now()+30;
+ for(let y=0;y<H;y++){
+  for(let x=0;x<W;x++){let c=V(0,0,0);RT.px=x;RT.py=y;
+   for(let i=0;i<aa;i++)for(let j=0;j<aa;j++){const sx=aa>1?(i+Math.random())/aa:.5,sy=aa>1?(j+Math.random())/aa:.5;
+    c=add(c,shade(b.pos,norm(add(b.f,add(mul(b.r,((x+sx)/W*2-1)*ht*asp),mul(b.u,(1-(y+sy)/H*2)*ht)))),0))}
+   c=mul(c,1/(aa*aa));const k=x*4;img.data[k]=gam(c.x);img.data[k+1]=gam(c.y);img.data[k+2]=gam(c.z);img.data[k+3]=255}
+  rg.putImageData(img,0,y);
+  if(performance.now()>end){prog(y+1);await nextFrame();if(id!==job)return false;Object.assign(RT,cfg);end=performance.now()+30}}
+ if(S.flare)drawFlare(W,H,b);prog(H);return true}
+function drawFlare(W,H,b){const d=sub(S.light.p,b.pos),z=dot(d,b.f);if(z<=0)return;
+ const sx=W/2+dot(d,b.r)/z/(b.ht*W/H)*W/2,sy=H/2-dot(d,b.u)/z/b.ht*H/2,Ld=len(d),ld=mul(d,1/Ld);
+ for(const o of S.objs){const t=hitObj(o,b.pos,ld);if(t>0&&t<Ld&&S.M[o.mat].trans<.5)return}
+ const x=rg;x.save();x.globalCompositeOperation='lighter';const R=W*.14,gr=x.createRadialGradient(sx,sy,0,sx,sy,R);
+ gr.addColorStop(0,'rgba(255,255,240,.95)');gr.addColorStop(.15,'rgba(255,225,170,.45)');gr.addColorStop(1,'rgba(255,190,120,0)');x.fillStyle=gr;x.beginPath();x.arc(sx,sy,R,0,7);x.fill();
+ x.strokeStyle='rgba(255,240,210,.35)';x.lineWidth=1.5;[[W*.3,0],[0,W*.12],[W*.1,W*.1],[W*.1,-W*.1]].forEach(([a,c])=>{x.beginPath();x.moveTo(sx-a,sy-c);x.lineTo(sx+a,sy+c);x.stroke()});
+ [[.4,.03,'120,180,255',.2],[.75,.055,'255,140,80',.14],[1.15,.02,'140,255,160',.22],[1.5,.09,'200,120,255',.1],[1.8,.04,'255,220,120',.15]].forEach(([t,r,c,a])=>{
+  const px=sx+(W/2-sx)*t*1.1,py=sy+(H/2-sy)*t*1.1;x.fillStyle=`rgba(${c},${a})`;x.beginPath();x.arc(px,py,W*r,0,7);x.fill()});x.restore()}
+
+const NW=Math.max(1,Math.min(16,navigator.hardwareConcurrency||4));
+const wURL=URL.createObjectURL(new Blob([$('core').textContent+`
+onmessage=e=>{const d=e.data;S=d.S;Object.assign(RT,d.cfg);RT.bg=null;const{W,H,aa,b}=d,asp=W/H,ht=b.ht;
+ if(d.bgd){const g=d.bgd;RT.bg=()=>{const i=(RT.py*W+RT.px)*4;return V((g[i]/255)**1.8,(g[i+1]/255)**1.8,(g[i+2]/255)**1.8)}}
+ for(let y=d.k;y<H;y+=d.n){const row=new Uint8ClampedArray(W*4);
+  for(let x=0;x<W;x++){let c=V(0,0,0);RT.px=x;RT.py=y;
+   for(let i=0;i<aa;i++)for(let j=0;j<aa;j++){const sx=aa>1?(i+Math.random())/aa:.5,sy=aa>1?(j+Math.random())/aa:.5;
+    c=add(c,shade(b.pos,norm(add(b.f,add(mul(b.r,((x+sx)/W*2-1)*ht*asp),mul(b.u,(1-(y+sy)/H*2)*ht)))),0))}
+   c=mul(c,1/(aa*aa));const k=x*4;row[k]=gam(c.x);row[k+1]=gam(c.y);row[k+2]=gam(c.z);row[k+3]=255}
+  postMessage({y,row},[row.buffer])}}`],{type:'text/javascript'}));
+let workers=[],curRes=null,noWorkers=false;
+function cancelRender(){workers.forEach(w=>w.terminate());workers=[];if(curRes){const r=curRes;curRes=null;r(false)}}
+function renderFrame(W,H,aa,prog){if(noWorkers)return renderFrameST(W,H,aa,prog);
+ cancelRender();rc.width=W;rc.height=H;rg.fillStyle='#000';rg.fillRect(0,0,W,H);
+ const b=orbitBasis(S.cam);let bgd=null;
+ if(bgImg){const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.drawImage(bgImg.img,0,0,W,H);bgd=x.getImageData(0,0,W,H).data}
+ return new Promise(res=>{curRes=res;let done=0;
+  try{for(let k=0;k<NW;k++){const w=new Worker(wURL);
+   w.onmessage=e=>{rg.putImageData(new ImageData(e.data.row,W,1),0,e.data.y);done++;
+    if(done%NW===0||done===H)prog(done);
+    if(done===H){workers.forEach(q=>q.terminate());workers=[];curRes=null;if(S.flare)drawFlare(W,H,b);res(true)}};
+   w.postMessage({S,cfg:{depth:S.depth,soft:S.light.soft,fog:true},bgd,W,H,aa,b,k,n:NW});workers.push(w)}}
+  catch(err){noWorkers=true;curRes=null;workers=[];renderFrameST(W,H,aa,prog).then(res)}})}
+async function doRender(quick){job++;cancelRender();openRW();const W=quick?S.resW>>1:S.resW,H=quick?S.resH>>1:S.resH,aa=quick?1:S.aa,t0=performance.now();
+ const ok=await renderFrame(W,H,aa,y=>{const pc=y/H,el=(performance.now()-t0)/1000;pfill.style.width=pc*100+'%';
+  rstat.textContent=`Rendering Frame ${S.frame}   Line ${y}/${H}   ${Math.floor(pc*100)}%   Elapsed ${el.toFixed(1)}s   Remaining ${Math.max(0,el/pc-el).toFixed(1)}s`});
+ if(ok)rstat.textContent=`Frame ${S.frame} complete.  ${W}x${H}  ${noWorkers?1:NW} threads  ${aa*aa} ray${aa>1?'s':''}/pixel  Render time ${((performance.now()-t0)/1000).toFixed(2)}s`}
+async function doRecord(W,H,aa){job++;cancelRender();const id=job;openRW();frames=[];const f0=S.frame,n=S.last-S.first+1,t0=performance.now();
+ for(let f=S.first;f<=S.last;f++){setFrame(f);
+  const ok=await renderFrame(W,H,aa,y=>{const pc=((f-S.first)+y/H)/n,el=(performance.now()-t0)/1000;pfill.style.width=pc*100+'%';
+   rstat.textContent=`Recording  Frame ${f}  (${f-S.first+1}/${n})  ${Math.floor(pc*100)}%  Elapsed ${el.toFixed(0)}s  Remaining ${Math.max(0,el/pc-el).toFixed(0)}s`});
+  if(!ok||id!==job)break;frames.push(rg.getImageData(0,0,W,H))}
+ setFrame(f0);if(frames.length&&id===job){rstat.textContent=`Recorded ${frames.length} frames in ${((performance.now()-t0)/1000).toFixed(1)}s`;startPB()}}
+function startPB(){rplay.style.display='';rplay.textContent='Stop';clearInterval(playI);
+ playI=setInterval(()=>{rg.putImageData(frames[fIdx],0,0);rstat.textContent=`Playback  frame ${S.first+fIdx} / ${S.first+frames.length-1}`;fIdx=(fIdx+1)%frames.length},1000/S.fps)}
+function stopPB(){clearInterval(playI);playI=null;rplay.textContent='Play'}
+function closeRW(){job++;cancelRender();stopPB();rwin.style.display='none'}
+$('rabort').onclick=()=>{job++;cancelRender();stopPB();rstat.textContent='Render aborted by user.'};
+$('rclose').onclick=closeRW;
+$('rplay').onclick=()=>playI?stopPB():startPB();
+$('rsave').onclick=()=>{const a=document.createElement('a');a.download=`${S.name}_${String(S.frame).padStart(3,'0')}.png`;a.href=rc.toDataURL();a.click()};
+
+// ================= keyboard =================
+addEventListener('keydown',e=>{const tg=e.target.tagName;if(tg==='INPUT'||tg==='SELECT')return;
+ if(e.key==='Escape'){hideMenu();if(reqs.length)reqs[reqs.length-1].close();else if(rwin.style.display==='flex')closeRW();return}
+ if(reqs.length||rwin.style.display==='flex')return;
+ const k=e.key.toLowerCase();
+ if(e.ctrlKey&&k==='z')undo();else if(e.ctrlKey&&k==='d')cloneSel();else if(e.ctrlKey||e.metaKey)return;
+ else if(k==='delete'||k==='backspace')delSel();else if(k==='t')setMouse('move');else if(k==='y')setMouse('rotate');else if(k==='h')setMouse('size');
+ else if(k==='n')numeric();else if(k==='enter')keyCmd(1);else if(k==='arrowleft')setFrame(S.frame-1);else if(k==='arrowright')setFrame(S.frame+1);
+ else if(k===' ')togglePlay();else if(k==='f9')doRender(false);else if(k==='f10')recordPanel();else if(k==='p')doRender(true);
+ else if(k==='q'){S.shadeView=!S.shadeView;draw()}else if(k==='c')center();
+ else if(k>='1'&&k<='6')setView(['xy','xz','zy','persp','light','camera'][+k-1]);
+ else return;e.preventDefault()});
+
+let UI=1,resp=false;try{resp=localStorage.getItem('lwResp')==='1'}catch(e){}
+const respB=el('btn','',14,552,180,()=>{resp=!resp;try{localStorage.setItem('lwResp',resp?'1':'0')}catch(e){}fit()});
+function fit(){respB.textContent=resp?'Display: Responsive':'Display: Standard';respB.classList.toggle('on',resp);
+ document.body.style.overflow=resp?'hidden':'auto';document.body.style.height=resp?'100vh':'auto';
+ UI=resp?Math.min((innerWidth-16)/904,(innerHeight-16)/664):1;const w=$('wrap');
+ w.style.width=904*UI+'px';w.style.height=664*UI+'px';w.style.top=Math.max(0,(innerHeight-664*UI)/2)+'px';app.style.transform=`scale(${UI})`}
+addEventListener('resize',fit);fit();
+setRadio('v','persp');setRadio('e','object');setRadio('m','move');status(HINT);setFrame(1);
+</script></body></html>
