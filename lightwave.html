@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LightWave 3D Layout</title>
+<html><head><meta charset="utf-8"><title>RetroWave 3D Layout</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#202020;font-family:"Courier New",monospace;overflow:hidden;height:100vh}
@@ -243,7 +243,7 @@ function setEdit(v){editMode=v;setRadio('e',v);draw()}
 function setMouse(v){mouseMode=v;setRadio('m',v);draw()}
 
 const TABS=[['Scene',()=>scenePanel()],['Objects',()=>objectsPanel()],['Surfaces',()=>surfacesPanel()],['Images',()=>imagesPanel()],['Lights',()=>lightsPanel()],
- ['Camera',()=>cameraPanel()],['Effects',()=>effectsPanel()],['Record',()=>recordPanel()],['Options',()=>optionsPanel()],['SN',()=>snPanel()]];
+ ['Camera',()=>cameraPanel()],['Effects',()=>effectsPanel()],['Record',()=>recordPanel()],['Options',()=>optionsPanel()],['About',()=>snPanel()]];
 TABS.reduce((x,[t,fn])=>{el('btn',t,x,4,t.length*8+10,fn);return x+t.length*8+15},6);
 el('btn','Modeler',808,4,80,()=>modelerPanel()).style.color='#555';
 el('btn','Quit',14,36,180,()=>quit());
@@ -294,7 +294,7 @@ const playB=el('btn','Play',452,556,100,()=>togglePlay());
 const autoB=el('btn','Auto Key',558,556,116,()=>{S.autoKey=!S.autoKey;draw()});
 const posBox=el('field','',690,532,186);Object.assign(posBox.style,{height:'84px',lineHeight:'19px'});
 el('lbl','t/y/h: move/rotate/size  n: numeric  Enter: key  Del  Ctrl+Z/D  F9: render  1-6: views',220,584,456).style.cssText+='font-weight:normal;font-size:11px;text-align:left';
-el('lbl','LightWave 3D 5.5',220,640,660);
+el('lbl','RetroWave 3D  -  inspired by LightWave 5.5',220,640,660);
 function syncFrame(){frameIn.value=S.frame;slider.min=S.first;slider.max=S.last;slider.value=S.frame}
 let playT=null;
 function togglePlay(on){if(on===undefined)on=!playT;clearInterval(playT);playT=null;
@@ -581,11 +581,17 @@ Keys:   t y h   Move / Rotate / Size     n   Numeric Input
         Left/Right frame  Space play     q   Quickshade
         p Quick render  F9 Render  F10 Record
         1-6  XY XZ ZY Perspective Light Camera`)})}
-function snPanel(){req('Serial Number',b=>note(b,'LightWave 3D  Layout 5.5\n\nSerial Number:  4E55-1997-00042\nHardware lock:  detected (parallel port)\nLicensed to:    Retro Render Studio\n\nRaytrace engine: 1 thread, double precision'))}
+function snPanel(){req('About',b=>note(b,`RetroWave 3D Layout
+
+An independent, non-commercial tribute inspired by
+LightWave 3D 5.5 (1997). Not affiliated with or
+endorsed by the owners of LightWave 3D.
+
+Single-file HTML/JS ray tracer - MIT License.`))}
 function modelerPanel(){let t='sphere',sz=.5;req('Modeler',b=>{note(b,'Modeler runs as a separate program.\nQuick primitive tool:');
  selF(b,'Primitive',[['sphere','Ball'],['box','Box']],()=>t,v=>t=v);numF(b,'Size',()=>sz,v=>sz=Math.max(.05,v),.1)},[['Make',()=>addObj(t,null,sz)],['Cancel']])}
-function quit(){req('Quit',b=>note(b,'Quit LightWave 3D Layout?\nUnsaved changes will be lost.'),[['Yes',()=>{togglePlay(false);app.innerHTML='';app.style.background='#000';
- const d=el('lbl','LightWave 3D has exited.',0,280,900);d.style.color='#aaa';const r=el('btn','Restart Layout',375,320,150,()=>location.reload());}],['No']])}
+function quit(){req('Quit',b=>note(b,'Quit RetroWave 3D Layout?\nUnsaved changes will be lost.'),[['Yes',()=>{togglePlay(false);app.innerHTML='';app.style.background='#000';
+ const d=el('lbl','RetroWave 3D has exited.',0,280,900);d.style.color='#aaa';const r=el('btn','Restart Layout',375,320,150,()=>location.reload());}],['No']])}
 
 // ================= motion graph =================
 let mgChan='pos';
